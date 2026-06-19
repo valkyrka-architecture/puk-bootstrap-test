@@ -1,0 +1,121 @@
+name: Bootstrap Repository
+
+# Runs automatically on the first push to main (detected via .github/BOOTSTRAP_PENDING).
+# Can also be triggered manually for re-runs or debugging.
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+    inputs:
+      template_repo:
+        description: 'Source template'
+        required: false
+        default: ''
+      force:
+        description: 'Run even if BOOTSTRAP_PENDING marker is absent'
+        type: boolean
+        default: false
+
+jobs:
+  bootstrap:
+    name: Copy variables from template
+    runs-on: ubuntu-latest
+    # Never run on the template repository itself!
+    if: github.event.repository.is_template == false
+    permissions:
+      contents: write
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Check whether bootstrap is pending
+        id: check
+        run: |
+          if [[ -f ".github/BOOTSTRAP_PENDING" || "${{ inputs.force }}" == "true" ]]; then
+            echo "pending=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "Bootstrap already completed — skipping."
+            echo "pending=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Copy repository variables
+        if: steps.check.outputs.pending == 'true'
+        env:
+          GH_TOKEN: ${{ secrets.BOOTSTRAP_TOKEN }}
+          TEMPLATE_REPO: ${{ inputs.template_repo != '' && inputs.template_repo || github.event.repository.template_repository.full_name }}
+          TARGET_REPO: ${{ github.repository }}
+        run: |
+          echo "==> Copying repository variables: $TEMPLATE_REPO → $TARGET_REPO"
+
+          VARS=$(gh api --paginate "/repos/$TEMPLATE_REPO/actions/variables" \
+            --jq '.variables[] | {name: .name, value: .value}' 2>/dev/null || true)
+
+          if [[ -z "$VARS" ]]; then
+            echo "No repository variables found in template."
+          else
+            echo "$VARS" | jq -c '.' | while IFS= read -r var; do
+              NAME=$(echo "$var" | jq -r '.name')
+              VALUE=$(echo "$var" | jq -r '.value')
+              echo "  → $NAME"
+              # Try create; fall back to update if it already exists
+              gh api --method POST "/repos/$TARGET_REPO/actions/variables" \
+                --field name="$NAME" --field value="$VALUE" 2>/dev/null \
+              || gh api --method PATCH "/repos/$TARGET_REPO/actions/variables/$NAME" \
+                --field name="$NAME" --field value="$VALUE"
+            done
+          fi
+
+      - name: Copy environment variables
+        if: steps.check.outputs.pending == 'true'
+        env:
+          GH_TOKEN: ${{ secrets.BOOTSTRAP_TOKEN }}
+          TEMPLATE_REPO: ${{ inputs.template_repo != '' && inputs.template_repo || github.event.repository.template_repository.full_name }}
+          TARGET_REPO: ${{ github.repository }}
+        run: |
+          echo "==> Copying environments and variables: $TEMPLATE_REPO → $TARGET_REPO"
+
+          ENVS=$(gh api --paginate "/repos/$TEMPLATE_REPO/environments" \
+            --jq '.environments[].name' 2>/dev/null || true)
+
+          if [[ -z "$ENVS" ]]; then
+            echo "No environments found in template."
+          else
+            while IFS= read -r ENV_NAME; do
+              [[ -z "$ENV_NAME" ]] && continue
+              echo "  Environment: $ENV_NAME"
+
+              # Create (or update) the environment in the target repo
+              gh api --method PUT "/repos/$TARGET_REPO/environments/$ENV_NAME" --silent
+
+              ENV_VARS=$(gh api --paginate \
+                "/repos/$TEMPLATE_REPO/environments/$ENV_NAME/variables" \
+                --jq '.variables[] | {name: .name, value: .value}' 2>/dev/null || true)
+
+              if [[ -z "$ENV_VARS" ]]; then
+                echo "    No variables."
+              else
+                echo "$ENV_VARS" | jq -c '.' | while IFS= read -r var; do
+                  NAME=$(echo "$var" | jq -r '.name')
+                  VALUE=$(echo "$var" | jq -r '.value')
+                  echo "    → $NAME"
+                  gh api --method POST \
+                    "/repos/$TARGET_REPO/environments/$ENV_NAME/variables" \
+                    --field name="$NAME" --field value="$VALUE" 2>/dev/null \
+                  || gh api --method PATCH \
+                    "/repos/$TARGET_REPO/environments/$ENV_NAME/variables/$NAME" \
+                    --field name="$NAME" --field value="$VALUE"
+                done
+              fi
+            done <<< "$ENVS"
+          fi
+
+      - name: Mark bootstrap complete
+        if: steps.check.outputs.pending == 'true'
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          rm -f .github/BOOTSTRAP_PENDING
+          git add .github/BOOTSTRAP_PENDING
+          git commit -m "chore: complete repository bootstrap"
+          git push

@@ -1,0 +1,3 @@
+This file triggers the bootstrap workflow on first push to a new repo created from this template.
+It is automatically removed once bootstrapping completes.
+Do not delete this file manually unless you want to skip bootstrapping.
