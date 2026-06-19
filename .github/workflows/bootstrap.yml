@@ -68,9 +68,10 @@ jobs:
           echo "==> Copying repository variables: $TEMPLATE_REPO → $TARGET_REPO"
 
           # Slurp all paginated responses into one compact array — prevents multi-line
-          # JSON objects from breaking the while-read loop
-          VARS=$(gh api --paginate "/repos/$TEMPLATE_REPO/actions/variables" 2>/dev/null \
-            | jq -sc '[.[].variables[] | {name: .name, value: .value}]' || true)
+          # JSON objects from breaking the while-read loop. ? suppresses null-iteration
+          # errors when the API returns an error response or empty body.
+          VARS=$(gh api --paginate "/repos/$TEMPLATE_REPO/actions/variables" \
+            | jq -sc '[.[]?.variables[]? | {name: .name, value: .value}]' 2>/dev/null || true)
 
           if [[ -z "$VARS" || "$VARS" == "[]" ]]; then
             echo "No repository variables found in template."
@@ -91,8 +92,8 @@ jobs:
         run: |
           echo "==> Copying environments and variables: $TEMPLATE_REPO → $TARGET_REPO"
 
-          ENVS=$(gh api --paginate "/repos/$TEMPLATE_REPO/environments" 2>/dev/null \
-            | jq -rc '[.[].environments[].name] | .[]' || true)
+          ENVS=$(gh api --paginate "/repos/$TEMPLATE_REPO/environments" \
+            | jq -rc '[.[]?.environments[]?.name] | .[]' 2>/dev/null || true)
 
           if [[ -z "$ENVS" ]]; then
             echo "No environments found in template."
@@ -104,8 +105,8 @@ jobs:
               gh api --method PUT "/repos/$TARGET_REPO/environments/$ENV_NAME" --silent
 
               ENV_VARS=$(gh api --paginate \
-                "/repos/$TEMPLATE_REPO/environments/$ENV_NAME/variables" 2>/dev/null \
-                | jq -sc '[.[].variables[] | {name: .name, value: .value}]' || true)
+                "/repos/$TEMPLATE_REPO/environments/$ENV_NAME/variables" \
+                | jq -sc '[.[]?.variables[]? | {name: .name, value: .value}]' 2>/dev/null || true)
 
               if [[ -z "$ENV_VARS" || "$ENV_VARS" == "[]" ]]; then
                 echo "    No variables."
