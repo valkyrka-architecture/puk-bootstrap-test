@@ -81,9 +81,9 @@ jobs:
               VALUE=$(echo "$var" | jq -r '.value')
               echo "  → $NAME"
               gh api --method POST "/repos/$TARGET_REPO/actions/variables" \
-                --field name="$NAME" --field value="$VALUE" 2>/dev/null \
+                --field name="$NAME" --field value="$VALUE" --silent 2>/dev/null \
               || gh api --method PATCH "/repos/$TARGET_REPO/actions/variables/$NAME" \
-                --field name="$NAME" --field value="$VALUE"
+                --field name="$NAME" --field value="$VALUE" --silent
             done
           fi
 
@@ -93,7 +93,7 @@ jobs:
           echo "==> Copying environments and variables: $TEMPLATE_REPO → $TARGET_REPO"
 
           ENVS=$(gh api --paginate "/repos/$TEMPLATE_REPO/environments" \
-            | jq -rc '[.[]?.environments[]?.name] | .[]' 2>/dev/null || true)
+            | jq -rsc '[.[]?.environments[]?.name] | .[]' 2>/dev/null || true)
 
           if [[ -z "$ENVS" ]]; then
             echo "No environments found in template."
@@ -117,10 +117,10 @@ jobs:
                   echo "    → $NAME"
                   gh api --method POST \
                     "/repos/$TARGET_REPO/environments/$ENV_NAME/variables" \
-                    --field name="$NAME" --field value="$VALUE" 2>/dev/null \
+                    --field name="$NAME" --field value="$VALUE" --silent 2>/dev/null \
                   || gh api --method PATCH \
                     "/repos/$TARGET_REPO/environments/$ENV_NAME/variables/$NAME" \
-                    --field name="$NAME" --field value="$VALUE"
+                    --field name="$NAME" --field value="$VALUE" --silent
                 done
               fi
             done <<< "$ENVS"
