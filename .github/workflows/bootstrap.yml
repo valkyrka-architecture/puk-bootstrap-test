@@ -67,13 +67,15 @@ jobs:
         run: |
           echo "==> Copying repository variables: $TEMPLATE_REPO → $TARGET_REPO"
 
-          VARS=$(gh api --paginate "/repos/$TEMPLATE_REPO/actions/variables" \
-            --jq '.variables[] | {name: .name, value: .value}' 2>/dev/null || true)
+          # Slurp all paginated responses into one compact array — prevents multi-line
+          # JSON objects from breaking the while-read loop
+          VARS=$(gh api --paginate "/repos/$TEMPLATE_REPO/actions/variables" 2>/dev/null \
+            | jq -sc '[.[].variables[] | {name: .name, value: .value}]' || true)
 
-          if [[ -z "$VARS" ]]; then
+          if [[ -z "$VARS" || "$VARS" == "[]" ]]; then
             echo "No repository variables found in template."
           else
-            echo "$VARS" | jq -c '.' | while IFS= read -r var; do
+            echo "$VARS" | jq -c '.[]' | while IFS= read -r var; do
               NAME=$(echo "$var" | jq -r '.name')
               VALUE=$(echo "$var" | jq -r '.value')
               echo "  → $NAME"
@@ -89,8 +91,8 @@ jobs:
         run: |
           echo "==> Copying environments and variables: $TEMPLATE_REPO → $TARGET_REPO"
 
-          ENVS=$(gh api --paginate "/repos/$TEMPLATE_REPO/environments" \
-            --jq '.environments[].name' 2>/dev/null || true)
+          ENVS=$(gh api --paginate "/repos/$TEMPLATE_REPO/environments" 2>/dev/null \
+            | jq -rc '[.[].environments[].name] | .[]' || true)
 
           if [[ -z "$ENVS" ]]; then
             echo "No environments found in template."
@@ -102,13 +104,13 @@ jobs:
               gh api --method PUT "/repos/$TARGET_REPO/environments/$ENV_NAME" --silent
 
               ENV_VARS=$(gh api --paginate \
-                "/repos/$TEMPLATE_REPO/environments/$ENV_NAME/variables" \
-                --jq '.variables[] | {name: .name, value: .value}' 2>/dev/null || true)
+                "/repos/$TEMPLATE_REPO/environments/$ENV_NAME/variables" 2>/dev/null \
+                | jq -sc '[.[].variables[] | {name: .name, value: .value}]' || true)
 
-              if [[ -z "$ENV_VARS" ]]; then
+              if [[ -z "$ENV_VARS" || "$ENV_VARS" == "[]" ]]; then
                 echo "    No variables."
               else
-                echo "$ENV_VARS" | jq -c '.' | while IFS= read -r var; do
+                echo "$ENV_VARS" | jq -c '.[]' | while IFS= read -r var; do
                   NAME=$(echo "$var" | jq -r '.name')
                   VALUE=$(echo "$var" | jq -r '.value')
                   echo "    → $NAME"
