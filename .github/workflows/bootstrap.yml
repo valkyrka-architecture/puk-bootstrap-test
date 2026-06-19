@@ -35,7 +35,6 @@ jobs:
 
       - name: Resolve template repository
         env:
-          # Use the built-in token here — no BOOTSTRAP_TOKEN needed just to read repo metadata
           GH_TOKEN: ${{ github.token }}
         run: |
           REPO="${{ inputs.template_repo }}"
@@ -67,10 +66,7 @@ jobs:
         if: steps.check.outputs.pending == 'true'
         run: |
           echo "==> Copying repository variables: $TEMPLATE_REPO → $TARGET_REPO"
-
-          # Slurp all paginated responses into one compact array — prevents multi-line
-          # JSON objects from breaking the while-read loop. ? suppresses null-iteration
-          # errors when the API returns an error response or empty body.
+          
           VARS=$(gh api --paginate "/repos/$TEMPLATE_REPO/actions/variables" \
             | jq -sc '[.[]?.variables[]? | {name: .name, value: .value}]' 2>/dev/null || true)
 
