@@ -90,6 +90,8 @@ jobs:
 
       - name: Copy environment variables
         if: steps.check.outputs.pending == 'true'
+        env:
+          BUILTIN_TOKEN: ${{ github.token }}
         run: |
           echo "==> Copying environments and variables: $TEMPLATE_REPO → $TARGET_REPO"
 
@@ -104,8 +106,8 @@ jobs:
               echo "  Environment: $ENV_NAME"
 
               # Use the built-in token here — the workflow runs inside the target repo
-              # so GITHUB_TOKEN has native write access without needing the PAT
-              GH_TOKEN="$GITHUB_TOKEN" gh api --method PUT "/repos/$TARGET_REPO/environments/$ENV_NAME" --silent \
+              # so it has native write access without needing the PAT
+              GH_TOKEN="$BUILTIN_TOKEN" gh api --method PUT "/repos/$TARGET_REPO/environments/$ENV_NAME" --silent \
                 || { echo "    Warning: could not create environment $ENV_NAME"; continue; }
 
               ENV_VARS=$(gh api --paginate \
