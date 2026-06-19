@@ -8,7 +8,7 @@ on:
   workflow_dispatch:
     inputs:
       template_repo:
-        description: 'Source template'
+        description: 'Source template (owner/repo) — required when running manually'
         required: false
         default: ''
       force:
@@ -20,14 +20,27 @@ jobs:
   bootstrap:
     name: Copy variables from template
     runs-on: ubuntu-latest
-    # Never run on the template repository itself!
+    # Never run on the template repository itself
     if: github.event.repository.is_template == false
     permissions:
       contents: write
+    env:
+      GH_TOKEN: ${{ secrets.REPOSITORY_GITHUB_BOOTSTRAP }}
+      TEMPLATE_REPO: ${{ inputs.template_repo != '' && inputs.template_repo || github.event.repository.template_repository.full_name }}
+      TARGET_REPO: ${{ github.repository }}
 
     steps:
       - name: Check out repository
         uses: actions/checkout@v4
+
+      - name: Resolve template repository
+        run: |
+          if [[ -z "$TEMPLATE_REPO" ]]; then
+            echo "::error::TEMPLATE_REPO could not be determined. When running via workflow_dispatch, supply the 'template_repo' input (e.g. owner/repo)."
+            exit 1
+          fi
+          echo "Template: $TEMPLATE_REPO"
+          echo "Target:   $TARGET_REPO"
 
       - name: Check whether bootstrap is pending
         id: check
@@ -41,10 +54,6 @@ jobs:
 
       - name: Copy repository variables
         if: steps.check.outputs.pending == 'true'
-        env:
-          GH_TOKEN: ${{ secrets.BOOTSTRAP_TOKEN }}
-          TEMPLATE_REPO: ${{ inputs.template_repo != '' && inputs.template_repo || github.event.repository.template_repository.full_name }}
-          TARGET_REPO: ${{ github.repository }}
         run: |
           echo "==> Copying repository variables: $TEMPLATE_REPO → $TARGET_REPO"
 
@@ -58,7 +67,6 @@ jobs:
               NAME=$(echo "$var" | jq -r '.name')
               VALUE=$(echo "$var" | jq -r '.value')
               echo "  → $NAME"
-              # Try create; fall back to update if it already exists
               gh api --method POST "/repos/$TARGET_REPO/actions/variables" \
                 --field name="$NAME" --field value="$VALUE" 2>/dev/null \
               || gh api --method PATCH "/repos/$TARGET_REPO/actions/variables/$NAME" \
@@ -68,10 +76,6 @@ jobs:
 
       - name: Copy environment variables
         if: steps.check.outputs.pending == 'true'
-        env:
-          GH_TOKEN: ${{ secrets.BOOTSTRAP_TOKEN }}
-          TEMPLATE_REPO: ${{ inputs.template_repo != '' && inputs.template_repo || github.event.repository.template_repository.full_name }}
-          TARGET_REPO: ${{ github.repository }}
         run: |
           echo "==> Copying environments and variables: $TEMPLATE_REPO → $TARGET_REPO"
 
@@ -85,7 +89,6 @@ jobs:
               [[ -z "$ENV_NAME" ]] && continue
               echo "  Environment: $ENV_NAME"
 
-              # Create (or update) the environment in the target repo
               gh api --method PUT "/repos/$TARGET_REPO/environments/$ENV_NAME" --silent
 
               ENV_VARS=$(gh api --paginate \
